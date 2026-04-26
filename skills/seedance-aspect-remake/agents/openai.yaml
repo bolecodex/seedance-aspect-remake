@@ -1,0 +1,4 @@
+display_name: Seedance 横竖屏转换
+short_description: 调用 Seedance 2.0 将视频横屏转竖屏或竖屏转横屏。
+default_prompt: 使用 seedance-aspect CLI 处理输入视频，自动拆分、调用 Seedance 2.0、拼接并保留原音轨。
+
