@@ -54,6 +54,12 @@ log "创建/更新 Python 虚拟环境"
 python -m pip install --upgrade pip >/dev/null
 python -m pip install -e "$INSTALL_DIR"
 
+if [ ! -f "$INSTALL_DIR/.env" ]; then
+  cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
+  chmod 600 "$INSTALL_DIR/.env"
+  log "已生成环境变量模板：$INSTALL_DIR/.env"
+fi
+
 ln -sf "$INSTALL_DIR/.venv/bin/seedance-aspect" "$BIN_DIR/seedance-aspect"
 log "CLI 已安装：$BIN_DIR/seedance-aspect"
 

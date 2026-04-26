@@ -65,12 +65,34 @@ class AppConfig:
         )
 
 
-def _load_dotenv_from_cwd() -> None:
+def _load_dotenv_files() -> None:
+    candidates = []
+
+    explicit = os.getenv("SEEDANCE_ASPECT_ENV")
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+
     for candidate in [Path.cwd(), *Path.cwd().parents]:
         env_file = candidate / ".env"
+        candidates.append(env_file)
+
+    home = Path.home()
+    configured_home = os.getenv("SEEDANCE_ASPECT_HOME")
+    if configured_home:
+        candidates.append(Path(configured_home).expanduser() / ".env")
+    candidates.append(home / ".local" / "share" / "seedance-aspect-remake" / ".env")
+
+    # Editable installs used by setup-gitee.sh keep src/ under the repository root.
+    candidates.append(Path(__file__).resolve().parents[2] / ".env")
+
+    seen = set()
+    for env_file in candidates:
+        resolved = env_file.resolve() if env_file.exists() else env_file
+        if resolved in seen:
+            continue
+        seen.add(resolved)
         if env_file.is_file():
             load_dotenv(env_file, override=False)
-            return
 
 
 def _env_int(name: str, default: int) -> int:
@@ -84,7 +106,7 @@ def _env_int(name: str, default: int) -> int:
 
 
 def load_config(overrides: Optional[Dict[str, Any]] = None) -> AppConfig:
-    _load_dotenv_from_cwd()
+    _load_dotenv_files()
     overrides = overrides or {}
 
     values: Dict[str, Any] = {

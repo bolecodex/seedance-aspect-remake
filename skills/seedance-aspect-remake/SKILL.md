@@ -19,6 +19,30 @@ bash <(curl -fsSL https://gitee.com/bolecodex/seedance-aspect-remake/raw/main/sc
 
 安装脚本会从 Gitee 拉取仓库，创建虚拟环境，安装 `seedance-aspect`，并同步本中文技能到 `${CODEX_HOME:-$HOME/.codex}/skills/seedance-aspect-remake`。
 
+## ArkCLaw 环境变量
+
+优先把配置写到安装目录的 `.env`：
+
+```bash
+vim "${SEEDANCE_ASPECT_HOME:-$HOME/.local/share/seedance-aspect-remake}/.env"
+```
+
+安装脚本会生成 `.env` 模板。推荐内容：
+
+```bash
+ARK_API_KEY="..."
+SEEDANCE_MODEL="doubao-seedance-2-0-260128"
+VOLC_ACCESSKEY="..."
+VOLC_SECRETKEY="..."
+TOS_BUCKET="..."
+TOS_ENDPOINT="tos-cn-beijing.volces.com"
+TOS_REGION="cn-beijing"
+```
+
+`TOS_REGION` 是推荐变量名；如果 ArkCLaw 里已有 `OS_REGION`，CLI 也会兼容读取。
+
+配置优先级：已导出的 Shell/ArkCLaw 任务环境变量最高，其次是 `SEEDANCE_ASPECT_ENV` 指定文件、当前项目 `.env`、安装目录 `.env`、开发仓库根目录 `.env`。
+
 ## 前置检查
 
 ```bash
@@ -34,6 +58,20 @@ test -n "$VOLC_ACCESSKEY" && test -n "$VOLC_SECRETKEY" && test -n "$TOS_BUCKET"
 - `ARK_BASE_URL`：默认 `https://ark.cn-beijing.volces.com`。
 - `SEEDANCE_MODEL`：推荐 `doubao-seedance-2-0-260128`。如果自定义 endpoint 返回 `AccessDenied`，先切回官方模型名验证权限。
 - `VOLC_ACCESSKEY`、`VOLC_SECRETKEY`、`TOS_BUCKET`：TOS 上传配置。
+
+## 调用技能示例
+
+用户可以这样要求：
+
+```text
+调用 seedance-aspect-remake，把 ./video/demo.mp4 这个横屏短剧转成竖屏剧，保留情节、剪辑节奏和原配音不变。
+```
+
+较长视频推荐分步表达：
+
+```text
+使用 seedance-aspect-remake 分步处理 ./input.mp4：先 split --no-upload，再 upload，之后 remake，最后 merge 输出 ./final_vertical.mp4。
+```
 
 ## 一键转换
 
