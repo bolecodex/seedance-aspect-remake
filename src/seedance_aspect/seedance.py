@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from seedance_aspect.ark import ArkClient
-from seedance_aspect.errors import ServerError
+from seedance_aspect.errors import NetworkError, ServerError
+from seedance_aspect.manifest import MediaReference
 
 
 @dataclass
@@ -17,16 +18,20 @@ class VideoGenerateRequest:
     ratio: str
     duration: int
     resolution: str
-    reference_uris: List[str]
+    reference_uris: List[str] = field(default_factory=list)
+    references: List[MediaReference] = field(default_factory=list)
     safety_identifier: str = ""
     watermark: bool = False
     generate_audio: bool = False
+    return_last_frame: bool = False
 
     def to_payload(self) -> Dict[str, Any]:
         content: List[Dict[str, Any]] = []
         prompt = self.prompt.strip()
         if prompt:
             content.append({"type": "text", "text": prompt})
+        for reference in self.references:
+            content.append(_reference_to_content(reference))
         for uri in self.reference_uris:
             content.append(
                 {
@@ -44,6 +49,8 @@ class VideoGenerateRequest:
             "watermark": self.watermark,
             "generate_audio": self.generate_audio,
         }
+        if self.return_last_frame:
+            payload["return_last_frame"] = True
         if self.safety_identifier:
             payload["safety_identifier"] = self.safety_identifier
         return payload
@@ -53,6 +60,27 @@ class VideoGenerateRequest:
 class SubmitResult:
     task_id: str
     request_id: Optional[str] = None
+
+
+def _reference_to_content(reference: MediaReference) -> Dict[str, Any]:
+    normalized = reference.normalized()
+    if normalized.media_type == "image":
+        return {
+            "type": "image_url",
+            "image_url": {"url": normalized.uri},
+            "role": normalized.role,
+        }
+    if normalized.media_type == "video":
+        return {
+            "type": "video_url",
+            "video_url": {"url": normalized.uri},
+            "role": normalized.role,
+        }
+    return {
+        "type": "audio_url",
+        "audio_url": {"url": normalized.uri},
+        "role": normalized.role,
+    }
 
 
 @dataclass
@@ -137,8 +165,25 @@ def poll_task(
 ) -> TaskStatus:
     deadline = time.monotonic() + max_wait_s
     last_normalized = ""
+    last_network_error = ""
     while True:
-        result = fetcher(task_id)
+        try:
+            result = fetcher(task_id)
+        except NetworkError as exc:
+            last_network_error = exc.message
+            if on_update:
+                on_update(
+                    TaskStatus(task_id=task_id, status="network_retry", fail_reason=exc.message),
+                    "running",
+                )
+            if time.monotonic() >= deadline:
+                return TaskStatus(
+                    task_id=task_id,
+                    status="expired",
+                    fail_reason=f"轮询超时，最后一次网络错误：{last_network_error}",
+                )
+            time.sleep(interval_s)
+            continue
         normalized = normalize_status(result.status)
         if normalized != last_normalized and on_update:
             on_update(result, normalized)
@@ -148,4 +193,3 @@ def poll_task(
         if time.monotonic() >= deadline:
             return TaskStatus(task_id=task_id, status="expired", fail_reason="轮询超时。")
         time.sleep(interval_s)
-

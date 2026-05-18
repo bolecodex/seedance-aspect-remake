@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,21 +101,44 @@ def _reference_filter(plan: SegmentPlan) -> str:
     return ",".join(filters)
 
 
-def extract_reference_segment(input_video: Path, output_path: Path, plan: SegmentPlan) -> Path:
+def _reference_audio_filter(plan: SegmentPlan) -> str:
+    filters = [
+        f"atrim=duration={plan.duration:.3f}",
+        "asetpts=PTS-STARTPTS",
+    ]
+    if plan.pad_seconds > 0.001:
+        filters.append(f"apad=pad_dur={plan.pad_seconds:.3f}")
+        filters.append(f"atrim=duration={plan.reference_duration:.3f}")
+    return ",".join(filters)
+
+
+def extract_reference_segment(
+    input_video: Path,
+    output_path: Path,
+    plan: SegmentPlan,
+    *,
+    include_audio: bool = True,
+) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    run_process(
+    has_audio = include_audio and probe_video(input_video).has_audio
+    args = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        f"{plan.start:.3f}",
+        "-t",
+        f"{plan.reference_duration:.3f}",
+        "-i",
+        str(input_video),
+        "-map",
+        "0:v:0",
+    ]
+    if has_audio:
+        args.extend(["-map", "0:a:0", "-vf", _reference_filter(plan), "-af", _reference_audio_filter(plan)])
+    else:
+        args.extend(["-vf", _reference_filter(plan), "-an"])
+    args.extend(
         [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            f"{plan.start:.3f}",
-            "-t",
-            f"{plan.reference_duration:.3f}",
-            "-i",
-            str(input_video),
-            "-vf",
-            _reference_filter(plan),
-            "-an",
             "-c:v",
             "libx264",
             "-preset",
@@ -123,22 +147,60 @@ def extract_reference_segment(input_video: Path, output_path: Path, plan: Segmen
             "26",
             "-pix_fmt",
             "yuv420p",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ],
-        timeout=900,
+        ]
     )
+    if has_audio:
+        args.extend(["-c:a", "aac", "-b:a", "128k"])
+    args.extend(["-t", f"{plan.reference_duration:.3f}", "-movflags", "+faststart", str(output_path)])
+    run_process(args, timeout=900)
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise FFmpegError(f"未生成参考片段：{output_path}")
     return output_path
 
 
-def align_generated_segment(input_video: Path, output_path: Path, target_duration: float) -> Path:
+def detect_scene_cuts(input_video: Path, *, threshold: float = 0.28) -> List[float]:
+    result = run_process(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            str(input_video),
+            "-vf",
+            f"select='gt(scene,{threshold:.4f})',showinfo",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ],
+        timeout=900,
+    )
+    cuts: List[float] = []
+    combined = f"{result.stdout}\n{result.stderr}"
+    for match in re.finditer(r"pts_time:([0-9]+(?:\.[0-9]+)?)", combined):
+        cuts.append(float(match.group(1)))
+    return cuts
+
+
+def align_generated_segment(
+    input_video: Path,
+    output_path: Path,
+    target_duration: float,
+    *,
+    mode: str = "trim-pad",
+) -> Path:
     current_duration = get_duration(input_video)
     if current_duration <= 0:
         raise FFmpegError(f"生成片段时长无效：{input_video}")
-    scale = target_duration / current_duration
+    if mode not in {"trim-pad", "speed"}:
+        raise FFmpegError("alignment-mode 仅支持 trim-pad、speed。")
+    if mode == "speed":
+        video_filter = f"setpts={target_duration / current_duration:.10f}*PTS,fps=24"
+    else:
+        pad_seconds = max(0.0, target_duration - current_duration)
+        filters = ["fps=24"]
+        if pad_seconds > 0.001:
+            filters.append(f"tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}")
+        video_filter = ",".join(filters)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     run_process(
         [
@@ -147,7 +209,7 @@ def align_generated_segment(input_video: Path, output_path: Path, target_duratio
             "-i",
             str(input_video),
             "-vf",
-            f"setpts={scale:.10f}*PTS,fps=24",
+            video_filter,
             "-t",
             f"{target_duration:.3f}",
             "-an",
@@ -165,6 +227,29 @@ def align_generated_segment(input_video: Path, output_path: Path, target_duratio
         ],
         timeout=900,
     )
+    return output_path
+
+
+def extract_last_frame(input_video: Path, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    run_process(
+        [
+            "ffmpeg",
+            "-y",
+            "-sseof",
+            "-0.08",
+            "-i",
+            str(input_video),
+            "-frames:v",
+            "1",
+            "-update",
+            "1",
+            str(output_path),
+        ],
+        timeout=300,
+    )
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise FFmpegError(f"未生成尾帧图片：{output_path}")
     return output_path
 
 

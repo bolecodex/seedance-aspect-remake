@@ -23,6 +23,22 @@ class TOSConfig:
 
 
 @dataclass
+class ArkAssetsConfig:
+    access_key: str
+    secret_key: str
+    region: str = "cn-beijing"
+    base_url: str = "https://open.volcengineapi.com"
+    service: str = "ark"
+    version: str = "2024-01-01"
+    project_name: str = "default"
+    group_id: str = ""
+    group_name: str = ""
+    group_description: str = ""
+    poll_interval_s: int = 3
+    poll_max_wait_s: int = 3600
+
+
+@dataclass
 class AppConfig:
     api_key: str = ""
     base_url: str = "https://ark.cn-beijing.volces.com"
@@ -40,6 +56,15 @@ class AppConfig:
     tos_endpoint: str = "tos-cn-beijing.volces.com"
     tos_region: str = "cn-beijing"
     tos_signed_url_expires: int = 604800
+    asset_base_url: str = "https://open.volcengineapi.com"
+    asset_service: str = "ark"
+    asset_version: str = "2024-01-01"
+    asset_project_name: str = "default"
+    asset_group_id: str = ""
+    asset_group_name: str = ""
+    asset_group_description: str = ""
+    asset_poll_interval_s: int = 3
+    asset_poll_max_wait_s: int = 3600
 
     @property
     def tos_available(self) -> bool:
@@ -62,6 +87,26 @@ class AppConfig:
             endpoint=self.tos_endpoint,
             region=self.tos_region,
             signed_url_expires=self.tos_signed_url_expires,
+        )
+
+    def require_assets(self) -> ArkAssetsConfig:
+        if not self.tos_access_key or not self.tos_secret_key:
+            raise ConfigError(
+                "自动录入私域素材库需要 VOLC_ACCESSKEY 和 VOLC_SECRETKEY。"
+            )
+        return ArkAssetsConfig(
+            access_key=self.tos_access_key,
+            secret_key=self.tos_secret_key,
+            region=self.tos_region,
+            base_url=self.asset_base_url,
+            service=self.asset_service,
+            version=self.asset_version,
+            project_name=self.asset_project_name,
+            group_id=self.asset_group_id,
+            group_name=self.asset_group_name,
+            group_description=self.asset_group_description,
+            poll_interval_s=self.asset_poll_interval_s,
+            poll_max_wait_s=self.asset_poll_max_wait_s,
         )
 
 
@@ -128,6 +173,15 @@ def load_config(overrides: Optional[Dict[str, Any]] = None) -> AppConfig:
         "tos_endpoint": os.getenv("TOS_ENDPOINT", "tos-cn-beijing.volces.com"),
         "tos_region": os.getenv("TOS_REGION") or os.getenv("OS_REGION") or "cn-beijing",
         "tos_signed_url_expires": _env_int("TOS_SIGNED_URL_EXPIRES", 604800),
+        "asset_base_url": os.getenv("ARK_ASSET_BASE_URL", "https://open.volcengineapi.com"),
+        "asset_service": os.getenv("ARK_ASSET_SERVICE", "ark"),
+        "asset_version": os.getenv("ARK_ASSET_VERSION", "2024-01-01"),
+        "asset_project_name": os.getenv("ARK_ASSET_PROJECT_NAME", "default"),
+        "asset_group_id": os.getenv("ARK_ASSET_GROUP_ID", ""),
+        "asset_group_name": os.getenv("ARK_ASSET_GROUP_NAME", ""),
+        "asset_group_description": os.getenv("ARK_ASSET_GROUP_DESCRIPTION", ""),
+        "asset_poll_interval_s": _env_int("ARK_ASSET_POLL_INTERVAL", 3),
+        "asset_poll_max_wait_s": _env_int("ARK_ASSET_POLL_MAX_WAIT", 3600),
     }
     values.update({k: v for k, v in overrides.items() if v is not None and v != ""})
     return AppConfig(**values)

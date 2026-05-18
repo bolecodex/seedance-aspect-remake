@@ -14,6 +14,7 @@ from seedance_aspect.config import load_config
 from seedance_aspect.errors import SeedanceAspectError
 from seedance_aspect.manifest import Manifest
 from seedance_aspect.pipeline import (
+    ingest_assets_job,
     merge_job,
     parse_asset_uris,
     refresh_status,
@@ -66,7 +67,18 @@ def split(
     segment_seconds: int = typer.Option(15, "--segment-seconds", "-s", help="每段最大秒数，范围 2-15。"),
     prompt: str = typer.Option("", "--prompt", help="追加提示词。"),
     asset_uris: str = typer.Option("", "--asset-uris", help="逗号分隔的 asset:// URI，数量需等于片段数。"),
+    asset_map: Optional[Path] = typer.Option(None, "--asset-map", help="私域人像/视频素材清单 JSON。"),
+    split_strategy: str = typer.Option("scene", "--split-strategy", help="scene 或 uniform。"),
+    scene_threshold: float = typer.Option(0.28, "--scene-threshold", help="FFmpeg scene 检测阈值。"),
+    continuity: str = typer.Option("always", "--continuity", help="always、scene-tail 或 off。"),
+    reference_audio: bool = typer.Option(True, "--reference-audio/--no-reference-audio", help="参考片段保留原音频，用于口型和说话人判断。"),
+    generation_duration_mode: str = typer.Option("auto", "--generation-duration-mode", help="auto 使用 Seedance 自动时长；ceil 使用整数秒。"),
+    alignment_mode: str = typer.Option("trim-pad", "--alignment-mode", help="trim-pad 不变速裁剪/补尾；speed 整体变速对齐。"),
     no_upload: bool = typer.Option(False, "--no-upload", help="只生成本地片段和 manifest，不上传 TOS。"),
+    auto_asset_ingest: bool = typer.Option(False, "--auto-asset-ingest", help="拆分后自动上传 TOS 并录入 Ark 私域素材库。"),
+    asset_group_id: str = typer.Option("", "--asset-group-id", help="使用已有 Ark 素材组 ID。"),
+    asset_group_name: str = typer.Option("", "--asset-group-name", help="自动创建/复用的 Ark 素材组名称。"),
+    asset_project_name: str = typer.Option("", "--asset-project-name", help="Ark 资源所属 ProjectName，默认 default。"),
     keep_audio: bool = typer.Option(True, "--keep-audio/--no-keep-audio", help="merge 时默认合回原音轨。"),
 ) -> None:
     """先完成本地拆分处理，再按需批量上传 TOS，并生成 manifest.json。"""
@@ -78,7 +90,18 @@ def split(
         segment_seconds=segment_seconds,
         prompt=prompt,
         asset_uris=parse_asset_uris(asset_uris),
+        asset_map_path=asset_map,
+        split_strategy=split_strategy,
+        scene_threshold=scene_threshold,
+        continuity=continuity,
+        reference_audio=reference_audio,
+        generation_duration_mode=generation_duration_mode,
+        alignment_mode=alignment_mode,
         no_upload=no_upload,
+        auto_asset_ingest=auto_asset_ingest,
+        asset_group_id=asset_group_id,
+        asset_group_name=asset_group_name,
+        asset_project_name=asset_project_name,
         keep_audio=keep_audio,
     )
 
@@ -91,6 +114,26 @@ def upload(
 ) -> None:
     """批量上传 manifest 中尚未上传的本地参考片段。"""
     upload_job(config=ctx.obj, manifest_path=manifest_path, force=force)
+
+
+@app.command("ingest-assets")
+def ingest_assets(
+    ctx: typer.Context,
+    manifest_path: Path = typer.Argument(..., help="manifest.json 路径。"),
+    group_id: str = typer.Option("", "--asset-group-id", help="使用已有 Ark 素材组 ID。"),
+    group_name: str = typer.Option("", "--asset-group-name", help="自动创建/复用的 Ark 素材组名称。"),
+    project_name: str = typer.Option("", "--asset-project-name", help="Ark 资源所属 ProjectName，默认 default。"),
+    force: bool = typer.Option(False, "--force", help="重新上传并创建素材，覆盖已有 Active 资产引用。"),
+) -> None:
+    """把本地参考片段上传 TOS 后录入 Ark 私域素材库，并写回 asset:// 引用。"""
+    ingest_assets_job(
+        config=ctx.obj,
+        manifest_path=manifest_path,
+        group_id=group_id,
+        group_name=group_name,
+        project_name=project_name,
+        force=force,
+    )
 
 
 @app.command()
@@ -146,6 +189,17 @@ def run(
     segment_seconds: int = typer.Option(15, "--segment-seconds", "-s", help="每段最大秒数，范围 2-15。"),
     prompt: str = typer.Option("", "--prompt", help="追加提示词。"),
     asset_uris: str = typer.Option("", "--asset-uris", help="逗号分隔的 asset:// URI，数量需等于片段数。"),
+    asset_map: Optional[Path] = typer.Option(None, "--asset-map", help="私域人像/视频素材清单 JSON。"),
+    split_strategy: str = typer.Option("scene", "--split-strategy", help="scene 或 uniform。"),
+    scene_threshold: float = typer.Option(0.28, "--scene-threshold", help="FFmpeg scene 检测阈值。"),
+    continuity: str = typer.Option("always", "--continuity", help="always、scene-tail 或 off。"),
+    reference_audio: bool = typer.Option(True, "--reference-audio/--no-reference-audio", help="参考片段保留原音频，用于口型和说话人判断。"),
+    generation_duration_mode: str = typer.Option("auto", "--generation-duration-mode", help="auto 使用 Seedance 自动时长；ceil 使用整数秒。"),
+    alignment_mode: str = typer.Option("trim-pad", "--alignment-mode", help="trim-pad 不变速裁剪/补尾；speed 整体变速对齐。"),
+    auto_asset_ingest: bool = typer.Option(False, "--auto-asset-ingest", help="拆分后自动上传 TOS 并录入 Ark 私域素材库。"),
+    asset_group_id: str = typer.Option("", "--asset-group-id", help="使用已有 Ark 素材组 ID。"),
+    asset_group_name: str = typer.Option("", "--asset-group-name", help="自动创建/复用的 Ark 素材组名称。"),
+    asset_project_name: str = typer.Option("", "--asset-project-name", help="Ark 资源所属 ProjectName，默认 default。"),
     keep_audio: bool = typer.Option(True, "--keep-audio/--no-keep-audio", help="合回原音轨。"),
     final_output: Optional[Path] = typer.Option(None, "--final-output", help="最终成片路径，默认 job/final.mp4。"),
     stop_on_error: bool = typer.Option(False, "--stop-on-error", help="任一片段失败后停止。"),
@@ -159,10 +213,22 @@ def run(
         segment_seconds=segment_seconds,
         prompt=prompt,
         asset_uris=parse_asset_uris(asset_uris),
+        asset_map_path=asset_map,
+        split_strategy=split_strategy,
+        scene_threshold=scene_threshold,
+        continuity=continuity,
+        reference_audio=reference_audio,
+        generation_duration_mode=generation_duration_mode,
+        alignment_mode=alignment_mode,
         no_upload=True,
+        auto_asset_ingest=auto_asset_ingest,
+        asset_group_id=asset_group_id,
+        asset_group_name=asset_group_name,
+        asset_project_name=asset_project_name,
         keep_audio=keep_audio,
     )
-    if not parse_asset_uris(asset_uris):
+    manifest = Manifest.load(manifest_path)
+    if manifest.source_reference_mode == "tos":
         upload_job(config=ctx.obj, manifest_path=manifest_path)
     remake_job(
         config=ctx.obj,
